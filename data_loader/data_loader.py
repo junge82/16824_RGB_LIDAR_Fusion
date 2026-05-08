@@ -57,7 +57,7 @@ class KittiDataset(Dataset):
     DataSet class to that holds and returns the KITTI data
     """
     def __init__(self, args, data_path: str, transform: transforms.Compose = None,
-                 training: bool = True):
+                 training: bool = True, indices: list[int] = None):
         if transform is not None:
             self.transform = transform
         else:
@@ -68,33 +68,40 @@ class KittiDataset(Dataset):
         split = "training"
 
         # Get image file paths
-        self.image_data_path = osp.join(data_path, "data_object_image_2", split, "image_2")
+        self.image_data_path = osp.join(data_path, "image_2")
         assert osp.exists(self.image_data_path)
         self.image_files = sorted(os.listdir(self.image_data_path))
         print(f"Num images files: {len(self.image_files)}")
 
         # Get label file paths
-        self.label_data_path = osp.join(data_path, "data_object_label_2", split, "label_2")
+        self.label_data_path = osp.join(data_path, "label_2")
         assert osp.exists(self.label_data_path)
         self.label_files = sorted(os.listdir(self.label_data_path))
         assert len(self.label_files) == len(self.image_files)
         print(f"Num label files: {len(self.label_files)}")
 
         # Get velodyne file paths
-        self.velodyne_data_path = osp.join(data_path, "data_object_velodyne", split, "velodyne")
+        self.velodyne_data_path = osp.join(data_path, "velodyne")
         assert osp.exists(self.velodyne_data_path)
         self.velodyne_files = sorted(os.listdir(self.velodyne_data_path))
         assert len(self.velodyne_files) == len(self.image_files)
         print(f"Num velodyne files: {len(self.velodyne_files)}")
 
         # Get calibration file paths
-        self.calibration_data_path = osp.join(data_path, "data_object_calib", split, "calib")
+        self.calibration_data_path = osp.join(data_path, "calib")
         assert osp.exists(self.calibration_data_path)
         self.calibration_files = sorted(os.listdir(self.calibration_data_path))
         assert len(self.calibration_files) == len(self.image_files)
         print(f"Num calibration files: {len(self.calibration_files)}")
 
         self.len = len(self.image_files)
+
+        if indices is not None:
+            self.image_files = [self.image_files[i] for i in indices]
+            self.label_files = [self.label_files[i] for i in indices]
+            self.velodyne_files = [self.velodyne_files[i] for i in indices]
+            self.calibration_files = [self.calibration_files[i] for i in indices]
+            self.len = len(indices)
 
     def __len__(self):
         return self.len
@@ -144,10 +151,31 @@ def get_data_loaders(args) -> tuple[DataLoader, DataLoader]:
     :param args:
     :return: tuple of (train data loader, val data loader)
     """
+    from sklearn.model_selection import train_test_split
+    
     train_tf, val_tf = get_transforms(args)
-
-    train_dataset = KittiDataset(args, args.train_dir, train_tf, training=True)
-    val_dataset = KittiDataset(args, args.val_dir, val_tf, training=False)
+    
+    # Use train_dir as the source for both train and val
+    data_path = args.train_dir
+    
+    # Create a temporary dataset to get total number of samples
+    temp_dataset = KittiDataset(args, data_path, train_tf, training=True)
+    total_samples = len(temp_dataset)
+    
+    # Split indices 80/20
+    all_indices = list(range(total_samples))
+    train_indices, val_indices = train_test_split(
+        all_indices, 
+        test_size=0.2, 
+        random_state=42,  # For reproducibility
+        shuffle=True
+    )
+    
+    # Create datasets with filtered indices
+    train_dataset = KittiDataset(args, data_path, train_tf, training=True, indices=train_indices)
+    val_dataset = KittiDataset(args, data_path, val_tf, training=False, indices=val_indices)
+    
+    print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
     train_loader = DataLoader(dataset=train_dataset,
                               batch_size=args.batch_size,

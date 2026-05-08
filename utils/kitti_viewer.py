@@ -461,21 +461,22 @@ def draw_2d_box(image: np.ndarray, labels: list[np.ndarray], calib: Calibration,
     for obj in objects:
         if obj.type=='DontCare':continue
         box3d_pts_2d, _ = compute_box_3d(obj, calib.P)
-        box3d_pts_2d = box3d_pts_2d.astype(np.int).tolist()
-        cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[1], color, 2)
-        cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[2], color, 2)
-        cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[3], color, 2)
-        cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[0], color, 2)
+        if box3d_pts_2d is not None:
+            box3d_pts_2d = box3d_pts_2d.astype(int).tolist()
+            cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[1], color, 2)
+            cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[2], color, 2)
+            cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[3], color, 2)
+            cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[0], color, 2)
 
-        cv2.line(image, box3d_pts_2d[4], box3d_pts_2d[5], color, 2)
-        cv2.line(image, box3d_pts_2d[5], box3d_pts_2d[6], color, 2)
-        cv2.line(image, box3d_pts_2d[6], box3d_pts_2d[7], color, 2)
-        cv2.line(image, box3d_pts_2d[7], box3d_pts_2d[4], color, 2)
+            cv2.line(image, box3d_pts_2d[4], box3d_pts_2d[5], color, 2)
+            cv2.line(image, box3d_pts_2d[5], box3d_pts_2d[6], color, 2)
+            cv2.line(image, box3d_pts_2d[6], box3d_pts_2d[7], color, 2)
+            cv2.line(image, box3d_pts_2d[7], box3d_pts_2d[4], color, 2)
 
-        cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[4], color, 2)
-        cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[5], color, 2)
-        cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[6], color, 2)
-        cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[7], color, 2)
+            cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[4], color, 2)
+            cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[5], color, 2)
+            cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[6], color, 2)
+            cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[7], color, 2)
 
     return image
 
@@ -489,8 +490,16 @@ def draw_2d_output(image: np.ndarray, labels: list[np.ndarray], calib: Calibrati
     if preds is not None:
         draw_2d_box(drawn_image, preds, calib, [0, 255, 0])
 
-    cv2.imshow("Bbox", drawn_image)
-    cv2.waitKey(0)
+    if drawn_image.dtype != np.uint8:
+        if drawn_image.dtype in (np.float32, np.float64):
+            if drawn_image.max() <= 1.0:
+                drawn_image = (drawn_image * 255).astype(np.uint8)
+            else:
+                drawn_image = np.clip(drawn_image, 0, 255).astype(np.uint8)
+        else:
+            drawn_image = np.clip(drawn_image, 0, 255).astype(np.uint8)
+
+    #cv2.imwrite("bbox_output.png", drawn_image)
 
 if __name__ == '__main__':
     dataset = kitti_object('./', 'training')
