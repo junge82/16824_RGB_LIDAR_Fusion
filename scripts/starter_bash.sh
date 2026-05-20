@@ -1,0 +1,1 @@
+chmod +x 16824_RGB_LIDAR_Fusion/install_rtx4060.sh
