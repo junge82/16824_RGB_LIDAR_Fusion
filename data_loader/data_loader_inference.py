@@ -1,0 +1,140 @@
+import cv2
+import torch
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
+import numpy as np
+import os
+from os import path as osp
+from PIL import Image
+from utils.kitti_viewer import Calibration
+
+CLASSNAMES_TO_IDX = {
+    "Car": 0,
+    "Pedestrian": 1,
+    "Cyclist": 2
+}
+
+def collate_fn(batch):
+    image = [item['image'] for item in batch]    
+    lidar = [item['lidar'] for item in batch]
+    calib = [item['calib'] for item in batch]
+
+    image = torch.stack(image)
+
+    data = dict()
+    data['image'] = image    
+    data['lidar'] = lidar
+    data['calib'] = calib
+
+    return data
+
+
+def get_transforms(args) -> tuple[transforms.Compose]:
+    """
+    :param args:
+    :return: transform composition for inference
+    """
+
+    test_tf = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((args.image_size, args.image_size), antialias=True),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+
+    return test_tf
+
+
+class KittiDataset(Dataset):
+    """
+    DataSet class to that holds and returns the KITTI data
+    """
+    def __init__(self, args, data_path: str, transform: transforms.Compose = None,
+                 training: bool = True, indices: list = None):
+        if transform is not None:
+            self.transform = transform
+        else:
+            self.transform = transforms.ToTensor()
+        self.data_path = data_path
+        self.training = training
+        split = "testing"
+
+        # Get image file paths
+        # Path to image data directory
+        self.image_data_path = osp.join( data_path,  "image_2")
+        print(f"Image data path: {self.image_data_path}")        
+        assert osp.exists(self.image_data_path)
+        self.image_files = sorted(os.listdir(self.image_data_path))
+        print(f"Num images files: {len(self.image_files)}")
+
+        # Get velodyne file paths
+        self.velodyne_data_path = osp.join(data_path, "velodyne")
+        assert osp.exists(self.velodyne_data_path)
+        self.velodyne_files = sorted(os.listdir(self.velodyne_data_path))
+        assert len(self.velodyne_files) == len(self.image_files)
+        print(f"Num velodyne files: {len(self.velodyne_files)}")
+
+        # Get calibration file paths
+        self.calibration_data_path = osp.join(data_path, "calib")
+        assert osp.exists(self.calibration_data_path)
+        self.calibration_files = sorted(os.listdir(self.calibration_data_path))
+        assert len(self.calibration_files) == len(self.image_files)
+        print(f"Num calibration files: {len(self.calibration_files)}")
+
+        if indices is not None:
+            self.image_files = [self.image_files[i] for i in indices]
+            self.velodyne_files = [self.velodyne_files[i] for i in indices]
+            self.calibration_files = [self.calibration_files[i] for i in indices]
+            self.len = len(indices)
+            print(f"Num files after filtering: {self.len}")
+        else:
+            self.len = len(self.image_files)
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        # Load image
+        image_path = osp.join(self.image_data_path, self.image_files[idx])
+        image = Image.open(image_path).convert('RGB')
+        image = self.transform(image)
+        
+        velo_path = osp.join(self.velodyne_data_path, self.velodyne_files[idx])
+        velo_np = np.fromfile(velo_path, dtype=np.float32)
+        velo_np = velo_np.reshape(-1, 4)
+        velo = torch.from_numpy(velo_np)
+
+        calib_path = osp.join(self.calibration_data_path, self.calibration_files[idx])
+        calib = Calibration(calib_path)
+
+        data = dict()
+        data['image'] = image
+        data['lidar'] = velo
+        data['calib'] = calib
+
+        return data
+
+
+def get_data_loaders(args) -> tuple[DataLoader]:
+    """
+    :param args:
+    :return: tuple of (test data loader)
+    """
+    
+    # Use data_dir as the source for both train and val
+    data_path = args.data_dir
+    print(f"Using data directory: {data_path}")
+    test_tf = get_transforms(args)
+    
+    
+    test_dataset = KittiDataset(args, args.data_dir, transform=test_tf, training=True)
+    
+
+    test_loader = DataLoader(dataset=test_dataset,
+                            batch_size=args.batch_size,
+                            shuffle=True,
+                            num_workers=args.num_data_loader_workers,
+                            drop_last=True,
+                            collate_fn=collate_fn,
+                            )
+
+    return test_loader

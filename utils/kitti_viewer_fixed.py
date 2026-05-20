@@ -1,10 +1,17 @@
 import os
+import sys
 import numpy as np
 from OpenGL.GL import glLineWidth
-import pyqtgraph as pg
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
+#import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 import cv2
 
+# Fix for OpenGL context error
+# Set environment variables before importing Qt/OpenGL
+#os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Use offscreen rendering if no display
+#os.environ['PYOPENGL_PLATFORM'] = 'egl'  # Use EGL for headless rendering
 
 class Object3d(object):
     ''' 3d object label '''
@@ -60,6 +67,7 @@ def inverse_rigid_trans(Tr):
     inv_Tr[0:3,0:3] = np.transpose(Tr[0:3,0:3])
     inv_Tr[0:3,3] = np.dot(-np.transpose(Tr[0:3,0:3]), Tr[0:3,3])
     return inv_Tr
+
 class Calibration(object):
     ''' Calibration matrices and utils
         3d XYZ in <label>.txt are in rect camera coord.
@@ -234,6 +242,7 @@ def load_velo_scan(velo_filename):
     scan = np.fromfile(velo_filename, dtype=np.float32)
     scan = scan.reshape((-1, 4))
     return scan
+
 def read_label(label_filename):
     lines = [line.rstrip() for line in open(label_filename)]
     objects = [Object3d(line) for line in lines]
@@ -246,10 +255,10 @@ class kitti_object(object):
         self.root_dir = root_dir
         self.split = split
         self.split_dir = os.path.join(root_dir, split)
-        #
-        self.lidar_dir = os.path.join('velodyne', self.split_dir)
-        self.label_dir = os.path.join('label', self.split_dir)
-        self.calib_dir = os.path.join('calib', self.split_dir)
+
+        self.lidar_dir = os.path.join(self.split_dir, 'velodyne')
+        self.label_dir = os.path.join(self.split_dir, 'labels_2')
+        self.calib_dir = os.path.join(self.split_dir, 'calib')
 
     def get_lidar(self, idx): 
         lidar_filename = os.path.join(self.lidar_dir, '%06d.bin'%(idx))
@@ -272,6 +281,7 @@ def rotx(t):
     return np.array([[1,  0,  0],
                      [0,  c, -s],
                      [0,  s,  c]])
+
 def roty(t):
     ''' Rotation about the y-axis. '''
     c = np.cos(t)
@@ -279,6 +289,7 @@ def roty(t):
     return np.array([[c,  0,  s],
                      [0,  1,  0],
                      [-s, 0,  c]])
+
 def rotz(t):
     ''' Rotation about the z-axis. '''
     c = np.cos(t)
@@ -286,6 +297,7 @@ def rotz(t):
     return np.array([[c, -s,  0],
                      [s,  c,  0],
                      [0,  0,  1]])
+
 def project_to_image(pts_3d, P):
     ''' Project 3d points to image plane.
     Usage: pts_2d = projectToImage(pts_3d, P)
@@ -301,11 +313,11 @@ def project_to_image(pts_3d, P):
     '''
     n = pts_3d.shape[0]
     pts_3d_extend = np.hstack((pts_3d, np.ones((n,1))))
-    #print(('pts_3d_extend shape: ', pts_3d_extend.shape))
     pts_2d = np.dot(pts_3d_extend, np.transpose(P)) # nx3
     pts_2d[:,0] /= pts_2d[:,2]
     pts_2d[:,1] /= pts_2d[:,2]
     return pts_2d[:,0:2]
+
 def compute_box_3d(obj, P):
     ''' Takes an object and a projection matrix (P) and projects the 3d
         bounding box into the image plane.
@@ -325,19 +337,17 @@ def compute_box_3d(obj, P):
     z_corners = [w/2,-w/2,-w/2,w/2,w/2,-w/2,-w/2,w/2]
     # rotate and translate 3d bounding box
     corners_3d = np.dot(R, np.vstack([x_corners,y_corners,z_corners]))
-    #print corners_3d.shape
     corners_3d[0,:] = corners_3d[0,:] + obj.t[0]
     corners_3d[1,:] = corners_3d[1,:] + obj.t[1]
     corners_3d[2,:] = corners_3d[2,:] + obj.t[2]
-    #print 'cornsers_3d: ', corners_3d 
     # only draw 3d bounding box for objs in front of the camera
     if np.any(corners_3d[2,:]<0.1):
         corners_2d = None
         return corners_2d, np.transpose(corners_3d)
     # project the 3d bounding box into the image plane
     corners_2d = project_to_image(np.transpose(corners_3d), P)
-    #print 'corners_2d: ', corners_2d
     return corners_2d, np.transpose(corners_3d)
+
 def compute_orientation_3d(obj, P):
     ''' Takes an object and a projection matrix (P) and projects the 3d
         object orientation vector into the image plane.
@@ -375,36 +385,95 @@ def create_bbox_mesh(p3d, gt_boxes3d, color=(0, 1, 0, 1)):
         p3d.add_line([b[i,0],b[i,1],b[i,2]], [b[j,0],b[j,1],b[j,2]], color=color)
 
 class plot3d(object):
-    def __init__(self):
-        self.app = pg.mkQApp()
-        self.view = gl.GLViewWidget()
-        coord = gl.GLAxisItem()
-        glLineWidth(3)
-        coord.setSize(3,3,3)
-        self.view.addItem(coord)
+    def __init__(self, use_display=True):
+        """
+        Initialize 3D plot viewer with OpenGL context error handling
+        
+        Args:
+            use_display: If False, skip OpenGL initialization (for headless environments)
+        """
+        self.use_display = use_display
+        self.app = None
+        self.view = None
+        
+        if use_display:
+            try:
+                QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+                # Try to create QApplication with proper OpenGL context
+                self.app = QApplication(sys.argv)
+                self.view = gl.GLViewWidget()
+                self.view.makeCurrent()
+                glLineWidth(3)
+                self.view.doneCurrent()
+
+                coord = gl.GLAxisItem()                
+                coord.setSize(3,3,3)
+                self.view.addItem(coord)
+            except Exception as e:
+                print(f"Warning: Could not initialize OpenGL context: {e}")
+                print("Running in headless mode. Visualization will be disabled.")
+                self.use_display = False
+                self.app = None
+                self.view = None
+    
     def add_points(self, points, colors):
-        points_item = gl.GLScatterPlotItem(pos=points, size=2, color=colors)
-        self.view.addItem(points_item)
+        if not self.use_display or self.view is None:
+            print("Skipping point visualization (headless mode)")
+            return
+        try:
+            points_item = gl.GLScatterPlotItem(pos=points, size=2, color=colors)
+            self.view.addItem(points_item)
+        except Exception as e:
+            print(f"Error adding points: {e}")
+    
     def add_line(self, p1, p2, color=(0,1,0,1)):
         """
         p1, p2: 3D points (3)
         color: (4) array RGB
         """
-        lines = np.array([[p1[0], p1[1], p1[2]],
-                          [p2[0], p2[1], p2[2]]])
-        lines_item = gl.GLLinePlotItem(pos=lines, mode='lines',
-                                       color=color, width=3, antialias=True)
-        self.view.addItem(lines_item)
+        if not self.use_display or self.view is None:
+            return
+        try:
+            lines = np.array([[p1[0], p1[1], p1[2]],
+                              [p2[0], p2[1], p2[2]]])
+            lines_item = gl.GLLinePlotItem(pos=lines, mode='lines',
+                                           color=color, width=3, antialias=True)
+            self.view.addItem(lines_item)
+        except Exception as e:
+            print(f"Error adding line: {e}")
+    
     def show(self):
-        self.view.show()
-        self.app.exec()
+        if not self.use_display or self.view is None or self.app is None:
+            print("Cannot show visualization (headless mode or OpenGL context error)")
+            return
+        try:
+            self.view.show()
+            self.app.exec()
+        except Exception as e:
+            print(f"Error showing visualization: {e}")
 
-def show_lidar_with_boxes(pc_velo: np.ndarray, objects: Object3d, calib: Calibration, preds: Object3d=None):
-    p3d = plot3d()
+def show_lidar_with_boxes(pc_velo: np.ndarray, objects: Object3d, calib: Calibration, preds: Object3d=None, use_display=True):
+    """
+    Visualize LIDAR point cloud with 3D bounding boxes
+    
+    Args:
+        pc_velo: Point cloud in velodyne coordinates
+        objects: Ground truth objects
+        calib: Calibration object
+        preds: Predicted objects (optional)
+        use_display: If False, skip visualization (for headless environments)
+    """
+    p3d = plot3d(use_display=use_display)
+    
+    if not p3d.use_display:
+        print("Visualization skipped due to OpenGL context error or headless environment")
+        return
+    
     points = pc_velo[:, 0:3]
     pc_inte = pc_velo[:, 3]
     pc_color = inte_to_rgb(pc_inte)
     p3d.add_points(points, pc_color)
+    
     for obj in objects:
         if obj.type=='DontCare':continue
         # Draw 3d bounding box
@@ -431,6 +500,7 @@ def show_lidar_with_boxes(pc_velo: np.ndarray, objects: Object3d, calib: Calibra
             x1,y1,z1 = ori3d_pts_3d_velo[0,:]
             x2,y2,z2 = ori3d_pts_3d_velo[1,:]
             p3d.add_line([x1,y1,z1], [x2,y2,z2], color=(0, 1, 0, 1))
+    
     p3d.show()
 
 def inte_to_rgb(pc_inte):
@@ -443,17 +513,20 @@ def inte_to_rgb(pc_inte):
 
 # -----------------------------------------------------------------------------------------
 
-def draw_3d_output(pc_velo: np.ndarray, labels: list[np.ndarray], calib: Calibration, preds: list[np.ndarray]=None):
+def draw_3d_output(pc_velo: np.ndarray, labels: list[np.ndarray], calib: Calibration, preds: list[np.ndarray]=None, use_display=True):
     """
     Example on how to use this function from training data
     draw_3d_output(lidar[0].to('cpu').numpy(), label[0].numpy().tolist(), calib[0])
+    
+    Args:
+        use_display: If False, skip visualization (for headless environments)
     """
     objects = [Object3d(line, from_file=False) for line in labels]
 
     if preds is not None:
         preds = [Object3d(line, from_file=False) for line in preds]
     
-    show_lidar_with_boxes(pc_velo, objects, calib, preds)
+    show_lidar_with_boxes(pc_velo, objects, calib, preds, use_display=use_display)
 
 
 def draw_2d_box(image: np.ndarray, labels: list[np.ndarray], calib: Calibration, color=[0, 255, 0]):
@@ -461,22 +534,21 @@ def draw_2d_box(image: np.ndarray, labels: list[np.ndarray], calib: Calibration,
     for obj in objects:
         if obj.type=='DontCare':continue
         box3d_pts_2d, _ = compute_box_3d(obj, calib.P)
-        if box3d_pts_2d is not None:
-            box3d_pts_2d = box3d_pts_2d.astype(int).tolist()
-            cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[1], color, 2)
-            cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[2], color, 2)
-            cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[3], color, 2)
-            cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[0], color, 2)
+        box3d_pts_2d = box3d_pts_2d.astype(np.int).tolist()
+        cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[1], color, 2)
+        cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[2], color, 2)
+        cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[3], color, 2)
+        cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[0], color, 2)
 
-            cv2.line(image, box3d_pts_2d[4], box3d_pts_2d[5], color, 2)
-            cv2.line(image, box3d_pts_2d[5], box3d_pts_2d[6], color, 2)
-            cv2.line(image, box3d_pts_2d[6], box3d_pts_2d[7], color, 2)
-            cv2.line(image, box3d_pts_2d[7], box3d_pts_2d[4], color, 2)
+        cv2.line(image, box3d_pts_2d[4], box3d_pts_2d[5], color, 2)
+        cv2.line(image, box3d_pts_2d[5], box3d_pts_2d[6], color, 2)
+        cv2.line(image, box3d_pts_2d[6], box3d_pts_2d[7], color, 2)
+        cv2.line(image, box3d_pts_2d[7], box3d_pts_2d[4], color, 2)
 
-            cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[4], color, 2)
-            cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[5], color, 2)
-            cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[6], color, 2)
-            cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[7], color, 2)
+        cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[4], color, 2)
+        cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[5], color, 2)
+        cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[6], color, 2)
+        cv2.line(image, box3d_pts_2d[3], box3d_pts_2d[7], color, 2)
 
     return image
 
@@ -490,20 +562,19 @@ def draw_2d_output(image: np.ndarray, labels: list[np.ndarray], calib: Calibrati
     if preds is not None:
         draw_2d_box(drawn_image, preds, calib, [0, 255, 0])
 
-    if drawn_image.dtype != np.uint8:
-        if drawn_image.dtype in (np.float32, np.float64):
-            if drawn_image.max() <= 1.0:
-                drawn_image = (drawn_image * 255).astype(np.uint8)
-            else:
-                drawn_image = np.clip(drawn_image, 0, 255).astype(np.uint8)
-        else:
-            drawn_image = np.clip(drawn_image, 0, 255).astype(np.uint8)
-
-    #cv2.imwrite("bbox_output.png", drawn_image)
+    cv2.imshow("Bbox", drawn_image)
+    cv2.waitKey(0)
 
 if __name__ == '__main__':
-    dataset = kitti_object('/mnt/fastDisk/kitti3d/kitti_object/')
-    data_idx = 3
+    # Check if display is available
+    use_display = 'DISPLAY' in os.environ or sys.platform == 'win32'
+    print(f"Using display: {use_display}")
+    if not use_display:
+        print("Warning: No display detected. Running in headless mode.")
+        print("Set DISPLAY environment variable or run on a system with a display for visualization.")
+    
+    dataset = kitti_object('/mnt/fastDisk/kitti3d/kitti_object', split='testing')    
+    data_idx = 33
     # PC
     lidar_data = dataset.get_lidar(data_idx)
     print(lidar_data.shape)
@@ -514,4 +585,6 @@ if __name__ == '__main__':
     calib = dataset.get_calibration(data_idx)
     print(calib.P)
     # Show
-    show_lidar_with_boxes(lidar_data, objects, calib)
+    show_lidar_with_boxes(lidar_data, objects, calib, use_display=use_display)
+
+# Made with Bob
