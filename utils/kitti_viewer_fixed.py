@@ -259,6 +259,7 @@ class kitti_object(object):
         self.lidar_dir = os.path.join(self.split_dir, 'velodyne')
         self.label_dir = os.path.join(self.split_dir, 'labels_2')
         self.calib_dir = os.path.join(self.split_dir, 'calib')
+        self.image_dir = os.path.join(self.split_dir, 'image_2')
 
     def get_lidar(self, idx): 
         lidar_filename = os.path.join(self.lidar_dir, '%06d.bin'%(idx))
@@ -271,6 +272,12 @@ class kitti_object(object):
     def get_label_objects(self, idx):
         label_filename = os.path.join(self.label_dir, '%06d.txt'%(idx))
         return read_label(label_filename)
+
+    def get_image(self, idx):
+        image_filename = os.path.join(self.image_dir, '%06d.png'%(idx))
+        image = cv2.imread(image_filename)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
 
 # -----------------------------------------------------------------------------------------
 
@@ -530,11 +537,11 @@ def draw_3d_output(pc_velo: np.ndarray, labels: list[np.ndarray], calib: Calibra
 
 
 def draw_2d_box(image: np.ndarray, labels: list[np.ndarray], calib: Calibration, color=[0, 255, 0]):
-    objects = [Object3d(line, from_file=False) for line in labels]
+    objects = [line if isinstance(line, Object3d) else Object3d(line, from_file=False) for line in labels]
     for obj in objects:
         if obj.type=='DontCare':continue
         box3d_pts_2d, _ = compute_box_3d(obj, calib.P)
-        box3d_pts_2d = box3d_pts_2d.astype(np.int).tolist()
+        box3d_pts_2d = box3d_pts_2d.astype(np.int32).tolist()
         cv2.line(image, box3d_pts_2d[0], box3d_pts_2d[1], color, 2)
         cv2.line(image, box3d_pts_2d[1], box3d_pts_2d[2], color, 2)
         cv2.line(image, box3d_pts_2d[2], box3d_pts_2d[3], color, 2)
@@ -562,8 +569,9 @@ def draw_2d_output(image: np.ndarray, labels: list[np.ndarray], calib: Calibrati
     if preds is not None:
         draw_2d_box(drawn_image, preds, calib, [0, 255, 0])
 
-    cv2.imshow("Bbox", drawn_image)
-    cv2.waitKey(0)
+    cv2.imwrite("bbox_output.png", drawn_image)
+    # cv2.imshow("Bbox", drawn_image)
+    # cv2.waitKey(0)
 
 if __name__ == '__main__':
     # Check if display is available
@@ -574,7 +582,8 @@ if __name__ == '__main__':
         print("Set DISPLAY environment variable or run on a system with a display for visualization.")
     
     dataset = kitti_object('/mnt/fastDisk/kitti3d/kitti_object', split='testing')    
-    data_idx = 33
+
+    data_idx = 31
     # PC
     lidar_data = dataset.get_lidar(data_idx)
     print(lidar_data.shape)
@@ -584,7 +593,14 @@ if __name__ == '__main__':
     # CALIB
     calib = dataset.get_calibration(data_idx)
     print(calib.P)
+    image = dataset.get_image(data_idx)
+    print(image.shape)
+
     # Show
     show_lidar_with_boxes(lidar_data, objects, calib, use_display=use_display)
+    draw_2d_output(image, objects, calib)
+
+
+    
 
 # Made with Bob

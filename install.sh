@@ -7,6 +7,13 @@ pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https
 pip install scikit-image scipy numba pillow matplotlib flask 
 pip install fire tensorboardX protobuf  spconv-cu113 tqdm wandb scikit-learn
 
+#opencv-python-headless   4.13.0.92
+#PyQt5                    5.15.11
+#PyQt5-Qt5                5.15.18
+#PyQt5_sip                12.18.0
+#PyOpenGL                 3.1.10
+
+
 #pip install  PyQt5==5.15.4 PyQtWebEngine==5.15.4
 
 #conda install -c conda-forge pyqt=5.15

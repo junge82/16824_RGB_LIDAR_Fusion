@@ -74,7 +74,7 @@ class KittiDataset(Dataset):
         print(f"Num images files: {len(self.image_files)}")
 
         # Get label file paths
-        self.label_data_path = osp.join(data_path, "label_2")
+        self.label_data_path = osp.join(data_path, "labels_2")
         assert osp.exists(self.label_data_path)
         self.label_files = sorted(os.listdir(self.label_data_path))
         assert len(self.label_files) == len(self.image_files)
@@ -156,7 +156,8 @@ def get_data_loaders(args) -> tuple[DataLoader, DataLoader]:
     train_tf, val_tf = get_transforms(args)
     
     # Use train_dir as the source for both train and val
-    data_path = args.train_dir
+    data_path = args.data_dir
+    print(f"Using data directory: {data_path}")
     
     # Create a temporary dataset to get total number of samples
     temp_dataset = KittiDataset(args, data_path, train_tf, training=True)

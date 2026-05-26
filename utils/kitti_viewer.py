@@ -499,7 +499,7 @@ def draw_2d_output(image: np.ndarray, labels: list[np.ndarray], calib: Calibrati
         else:
             drawn_image = np.clip(drawn_image, 0, 255).astype(np.uint8)
 
-    #cv2.imwrite("bbox_output.png", drawn_image)
+    cv2.imwrite("bbox_output.png", drawn_image)
 
 if __name__ == '__main__':
     dataset = kitti_object('/mnt/fastDisk/kitti3d/kitti_object/')
